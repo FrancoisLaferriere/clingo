@@ -64,6 +64,7 @@ enum class AppMode : uint8_t {
     parse,   //!< Stop processing after parsing.
     rewrite, //!< Stop processing after rewriting.
     ground,  //!< Stop processing after grounding.
+    aspif,   //!< TODO
     solve    //!< Stop processing after solving.
 };
 
@@ -847,6 +848,7 @@ class Solver : public BaseView {
     Util::OutputBuffer buf_;
     UProgramBackend backend_;
     std::unique_ptr<Output::TheoryData> theory_;
+    std::unique_ptr<Potassco::AbstractProgram> program_;
     UOutputStm out_;
     UModel mdl_;
     USymbolTable sym_tab_;

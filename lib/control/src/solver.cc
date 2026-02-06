@@ -4,7 +4,10 @@
 
 #include <clasp/solver.h>
 
+#include <potassco/aspif.h>
 #include <potassco/aspif_text.h>
+#include <potassco/reify.h>
+#include <potassco/smodels.h>
 #include <potassco/theory_data.h>
 
 #include <future>
@@ -41,6 +44,9 @@ class AbstractProgramBackendImpl : public ProgramBackend, public TheoryBackend {
         buf_ << sym;
         return buf_.view();
     }
+
+  protected:
+    auto program() -> Potassco::AbstractProgram & { return *prg_; }
 
   private:
     virtual auto do_term_id(Symbol sym) -> prg_id_t = 0;
@@ -250,6 +256,43 @@ class AbstractProgramBackendImpl : public ProgramBackend, public TheoryBackend {
     Util::OutputBuffer buf_;
     std::vector<Potassco::Atom_t> atoms_;
     std::vector<Potassco::WeightLit> wlits_;
+};
+
+class PotasscoBackend : public AbstractProgramBackendImpl {
+  public:
+    template <class... U>
+    PotasscoBackend(Potassco::AbstractProgram &prg, TermBaseMap &terms)
+        : AbstractProgramBackendImpl{prg}, terms_{&terms} {}
+
+  private:
+    auto do_next_lit() -> prg_lit_t override {
+        if (auto lit = new_atom(); std::cmp_less_equal(lit, prg_lit_max)) {
+            return static_cast<prg_lit_t>(lit);
+        }
+        throw std::range_error("number of literals exhausted");
+    }
+
+    auto do_fact_lit() -> std::optional<prg_lit_t> override {
+        return std::nullopt;
+    } // NOTE: only called in the aspif parser
+
+    auto do_term_id(Symbol sym) -> prg_id_t override {
+        auto nId = terms_->add(sym, [&, this]() {
+            auto nId = new_show_term();
+            program().outputTerm(nId, as_str(sym));
+            return nId;
+        });
+        return nId;
+    }
+
+    void do_term_id(Symbol sym, prg_id_t id) override { terms_->add(sym, id); }
+
+    auto new_atom() -> Potassco::Atom_t { return nextAtom_++; }
+    auto new_show_term() -> prg_id_t { return nextShowTerm_++; }
+
+    Potassco::Atom_t nextAtom_{1};
+    prg_id_t nextShowTerm_{0};
+    TermBaseMap *terms_;
 };
 
 class ProgramBackendImpl : public AbstractProgramBackendImpl {
@@ -1081,6 +1124,15 @@ auto Solver::make_output_(SymbolStore &store, AppMode mode) -> UOutputStm {
             backend_ = std::move(backend);
             return Output::make_backend_output(store, *backend_, *theory_);
         }
+        case AppMode::aspif: {
+            // abstract_prg_ = std::make_unique<Potassco::SmodelsOutput>(std::cout, false, 0);
+            // abstract_prg_ = std::make_unique<Potassco::Reifier>(std::cout, Potassco::Reifier::Options{false, false});
+            program_ = std::make_unique<Potassco::AspifOutput>(std::cout);
+            auto backend = std::make_unique<PotasscoBackend>(*program_, terms_);
+            theory_ = std::make_unique<Output::TheoryData>(store, *backend);
+            backend_ = std::move(backend);
+            return Output::make_backend_output(store, *backend_, *theory_);
+        }
         default: {
             return Output::make_text_output(buf_);
         }
@@ -1360,6 +1412,9 @@ auto Solver::ground(Input::ProgramParamVec const &params, Ground::ScriptCallback
         prepare_();
         res = grd_.ground(params, ctx != nullptr ? ctx : scripts_, stop);
         clasp_->ctx.report(Grounded{params});
+        if (opts_.mode == AppMode::aspif) { // TODO: where to put this?
+            backend_->end_step();
+        }
     }
     return res;
 }
@@ -1434,6 +1489,15 @@ void Solver::prepare_() {
         }
         if (!clasp_->update()) {
             grd_.mark_unsat();
+        }
+    }
+    if (opts_.mode == AppMode::aspif) { // TODO: is it the right place for this?
+        if (state_ == State::initial) {
+            backend_->preamble(2, 0, 0, clasp_->incremental());
+            backend_->begin_step();
+        }
+        if (state_ == State::grounded) {
+            backend_->begin_step();
         }
     }
     state_ = State::grounded;

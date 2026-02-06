@@ -150,6 +150,7 @@ class ClingoApp : public Clasp::Cli::ClaspAppBase {
         parse = static_cast<uint8_t>(AppMode::parse),
         rewrite = static_cast<uint8_t>(AppMode::rewrite),
         ground = static_cast<uint8_t>(AppMode::ground),
+        aspif = static_cast<uint8_t>(AppMode::aspif),
         solve = static_cast<uint8_t>(AppMode::solve),
         clasp = static_cast<uint8_t>(AppMode::solve) + 1,
     };
@@ -180,6 +181,7 @@ class ClingoApp : public Clasp::Cli::ClaspAppBase {
                                               {"parse", Mode::parse},
                                               {"rewrite", Mode::rewrite},
                                               {"ground", Mode::ground},
+                                              {"aspif", Mode::aspif},
                                               {"solve", Mode::solve},
                                               {"clasp", Mode::clasp},
                                           })),
