@@ -260,7 +260,6 @@ class AbstractProgramBackendImpl : public ProgramBackend, public TheoryBackend {
 
 class PotasscoBackend : public AbstractProgramBackendImpl {
   public:
-    template <class... U>
     PotasscoBackend(Potassco::AbstractProgram &prg, TermBaseMap &terms)
         : AbstractProgramBackendImpl{prg}, terms_{&terms} {}
 
