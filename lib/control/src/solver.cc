@@ -296,8 +296,8 @@ class PotasscoBackend : public AbstractProgramBackendImpl {
 
 class ProgramBackendImpl : public AbstractProgramBackendImpl {
   public:
-    ProgramBackendImpl(Clasp::Asp::LogicProgram &prg, TermBaseMap &terms)
-        : AbstractProgramBackendImpl{adapter_}, prg_{&prg}, terms_{&terms} {}
+    ProgramBackendImpl(Potassco::AbstractProgram &program, Clasp::Asp::LogicProgram &prg, TermBaseMap &terms)
+        : AbstractProgramBackendImpl{program}, prg_{&prg}, terms_{&terms} {}
 
   private:
     auto do_next_lit() -> prg_lit_t override {
@@ -321,7 +321,6 @@ class ProgramBackendImpl : public AbstractProgramBackendImpl {
     void do_term_id(Symbol sym, prg_id_t id) override { terms_->add(sym, id); }
 
     Clasp::Asp::LogicProgram *prg_;
-    Clasp::Asp::LogicProgramAdapter adapter_{*prg_};
     TermBaseMap *terms_;
 };
 
@@ -1118,7 +1117,8 @@ Solver::Solver(Clasp::ClaspFacade &clasp, Clasp::Cli::ClaspCliConfig &clasp_conf
 auto Solver::make_output_(SymbolStore &store, AppMode mode) -> UOutputStm {
     switch (mode) {
         case AppMode::solve: {
-            auto backend = std::make_unique<ProgramBackendImpl>(*clasp_->asp(), terms_);
+            program_ = std::make_unique<Clasp::Asp::LogicProgramAdapter>(*clasp_->asp());
+            auto backend = std::make_unique<ProgramBackendImpl>(*program_, *clasp_->asp(), terms_);
             theory_ = std::make_unique<Output::TheoryData>(store, *backend);
             backend_ = std::move(backend);
             return Output::make_backend_output(store, *backend_, *theory_);
