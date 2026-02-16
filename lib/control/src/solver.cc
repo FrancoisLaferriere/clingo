@@ -1110,33 +1110,52 @@ auto SymbolTable::output(CppClingo::Symbol const &sym) -> State & {
 
 Solver::Solver(Clasp::ClaspFacade &clasp, Clasp::Cli::ClaspCliConfig &clasp_config, Logger &log, SymbolStore &store,
                Scripts &scripts, Input::RewriteOptions ropts, SolverOptions sopts, FILE *out)
-    : clasp_{&clasp}, config_{clasp_config}, buf_{out}, out_{make_output_(store, sopts.mode)},
-      grd_{log, store, ropts, *out_}, scripts_{&scripts}, opts_{std::move(sopts)} {
+    : clasp_{&clasp}, config_{clasp_config}, buf_{out},
+      out_{make_output_(store, sopts.mode, sopts.format, sopts.reify)}, grd_{log, store, ropts, *out_},
+      scripts_{&scripts}, opts_{std::move(sopts)} {
 }
 
-auto Solver::make_output_(SymbolStore &store, AppMode mode) -> UOutputStm {
-    switch (mode) {
-        case AppMode::solve: {
+auto Solver::make_output_(SymbolStore &store, AppMode mode, ModeFormat format, ReifyFlag reify) -> UOutputStm {
+    if (mode != AppMode::solve) {
+        return Output::make_text_output(buf_);
+    }
+
+    switch (format) {
+        case ModeFormat::solve_default: {
             program_ = std::make_unique<Clasp::Asp::LogicProgramAdapter>(*clasp_->asp());
-            auto backend = std::make_unique<ProgramBackendImpl>(*program_, *clasp_->asp(), terms_);
-            theory_ = std::make_unique<Output::TheoryData>(store, *backend);
-            backend_ = std::move(backend);
-            return Output::make_backend_output(store, *backend_, *theory_);
+            break;
         }
-        case AppMode::aspif: {
-            // abstract_prg_ = std::make_unique<Potassco::SmodelsOutput>(std::cout, false, 0);
-            // abstract_prg_ = std::make_unique<Potassco::Reifier>(std::cout, Potassco::Reifier::Options{false, false});
+        case ModeFormat::aspif: {
             program_ = std::make_unique<Potassco::AspifOutput>(std::cout);
-            auto backend = std::make_unique<PotasscoBackend>(*program_, terms_);
-            theory_ = std::make_unique<Output::TheoryData>(store, *backend);
-            backend_ = std::move(backend);
-            return Output::make_backend_output(store, *backend_, *theory_);
+            break;
+        }
+        case ModeFormat::smodels: {
+            program_ = std::make_unique<Potassco::SmodelsOutput>(std::cout, true, clasp_->asp()->falseAtom());
+            break;
+        }
+        case ModeFormat::reify: {
+            Potassco::Reifier::Options reify_opts{};
+            reify_opts.reifyStep = Potassco::test(reify, ReifyFlag::reify_step);
+            reify_opts.calculateSccs = Potassco::test(reify, ReifyFlag::reify_scc);
+            program_ = std::make_unique<Potassco::Reifier>(std::cout, reify_opts);
+            break;
         }
         default: {
-            return Output::make_text_output(buf_);
+            POTASSCO_ASSERT_NOT_REACHED("invalid output format for solving mode");
         }
     }
-    Util::unreachable();
+
+    std::unique_ptr<AbstractProgramBackendImpl> backend;
+    if (format != ModeFormat::solve_default) {
+        backend = std::make_unique<PotasscoBackend>(*program_, terms_);
+    } else {
+        backend = std::make_unique<ProgramBackendImpl>(*program_, *clasp_->asp(), terms_);
+    }
+
+    theory_ = std::make_unique<Output::TheoryData>(store, *backend);
+    backend_ = std::move(backend);
+
+    return Output::make_backend_output(store, *backend_, *theory_);
 }
 
 void Solver::interrupt() noexcept {
@@ -1411,9 +1430,6 @@ auto Solver::ground(Input::ProgramParamVec const &params, Ground::ScriptCallback
         prepare_();
         res = grd_.ground(params, ctx != nullptr ? ctx : scripts_, stop);
         clasp_->ctx.report(Grounded{params});
-        if (opts_.mode == AppMode::aspif) { // TODO: where to put this?
-            backend_->end_step();
-        }
     }
     return res;
 }
@@ -1488,15 +1504,6 @@ void Solver::prepare_() {
         }
         if (!clasp_->update()) {
             grd_.mark_unsat();
-        }
-    }
-    if (opts_.mode == AppMode::aspif) { // TODO: is it the right place for this?
-        if (state_ == State::initial) {
-            backend_->preamble(2, 0, 0, clasp_->incremental());
-            backend_->begin_step();
-        }
-        if (state_ == State::grounded) {
-            backend_->begin_step();
         }
     }
     state_ = State::grounded;
